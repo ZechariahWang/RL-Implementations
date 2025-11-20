@@ -1,5 +1,6 @@
 import torch
 from torch import nn as nn
+import os
 from softactorcritic.networks import MLP, QNetwork, ActionNetwork
 
 class Agent:
@@ -42,6 +43,7 @@ class Agent:
             net.train()
     
     def save_models(self, path):
+        os.makedirs(path, exist_ok=True)
         for i, net in enumerate(self.networks):
             torch.save(net.state_dict(), f"{path}/network_{i}.pth")
     

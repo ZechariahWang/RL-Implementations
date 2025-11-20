@@ -12,7 +12,7 @@ class SACTrainer:
         self.batch_size=batch_size
         self.data_type=data_type
 
-        self.replay_buffer=ReplayBuffer(buffer_size, data_type)
+        self.replay_buffer=ReplayBuffer(buffer_size, agent.input_shape, agent.action_shape, data_type)
 
         # Alpha as a learnable parameter
         self.log_alpha = torch.tensor(np.log(alpha), requires_grad=True, dtype=data_type)
@@ -28,7 +28,7 @@ class SACTrainer:
         return self.log_alpha.exp().detach()
 
     
-    def compute_loss(self, state, action, reward, next_state, done):
+    def compute_q_loss(self, state, action, reward, next_state, done):
         with torch.no_grad():
             next_action, next_log_prob, _, _ = self.agent.actor(next_state)
             q1_next = self.agent.q1_target(next_state, next_action)
@@ -43,6 +43,10 @@ class SACTrainer:
         q1_loss = nn.MSELoss()(q1_val, target_q)
         q2_loss = nn.MSELoss()(q2_val, target_q)
 
+        return q1_loss, q2_loss
+
+    def compute_actor_loss(self, state):
+
         new_action, log_prob, _, _ = self.agent.actor(state)
         q1_new_action = self.agent.q1(state, new_action)
         q2_new_action = self.agent.q2(state, new_action)
@@ -52,7 +56,7 @@ class SACTrainer:
         # Alpha loss for entropy regularization
         alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
 
-        return q1_loss, q2_loss, actor_loss, alpha_loss
+        return actor_loss, alpha_loss, log_prob
     
     def train_step(self):
         if self.replay_buffer.size < self.batch_size:
@@ -60,7 +64,8 @@ class SACTrainer:
 
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(self.batch_size)
 
-        q1_loss, q2_loss, actor_loss, alpha_loss = self.compute_loss(states, actions, rewards, next_states, dones)
+        # Update Q-networks
+        q1_loss, q2_loss = self.compute_q_loss(states, actions, rewards, next_states, dones)
 
         self.q1_optimizer.zero_grad()
         q1_loss.backward()
@@ -69,6 +74,9 @@ class SACTrainer:
         self.q2_optimizer.zero_grad()
         q2_loss.backward()
         self.q2_optimizer.step()
+
+        # Update Actor and Alpha (needs fresh forward pass to avoid graph issues)
+        actor_loss, alpha_loss, _ = self.compute_actor_loss(states)
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
